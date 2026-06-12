@@ -6,7 +6,7 @@ import uuid
 from threading import Thread, Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import Flask, render_template, request, send_file, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, send_file, redirect, flash, jsonify
 from werkzeug.utils import secure_filename
 
 import openpyxl
@@ -31,16 +31,17 @@ client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 MAX_WORKERS = 4
 
-# 🔥 CONTROLE GLOBAL DE PROGRESSO
 tasks = {}
 tasks_lock = Lock()
 
 
+# ========================
+# HELPERS
+# ========================
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-# ========= EXTRAÇÃO =========
 def extract_text_from_pdf(filepath):
     text = ""
     try:
@@ -70,11 +71,12 @@ def extract_text(filepath, ext):
         return extract_text_from_pdf(filepath)
     elif ext in ("doc", "docx"):
         return extract_text_from_docx(filepath)
-    else:
-        return ""
+    return ""
 
 
-# ========= IA =========
+# ========================
+# IA
+# ========================
 def analyze_resume(text, vaga):
     if not client:
         return {"nome": "Sem API", "score": "-", "status": "-", "justificativa": "API não configurada"}
@@ -95,61 +97,69 @@ Retorne JSON: nome, whatsapp, email, score, status, justificativa
             messages=[{"role": "user", "content": prompt}],
             timeout=20
         )
-        data = json.loads(res.choices[0].message.content)
+
+        content = res.choices[0].message.content.strip()
+
+        content = re.sub(r"```.*?```", "", content, flags=re.DOTALL).strip()
+
+        data = json.loads(content)
+
         return data
     except:
         return {"nome": "Erro IA", "score": "-", "status": "Erro", "justificativa": "Falha IA"}
 
 
-# ========= PROCESSAMENTO =========
-def process_file(file, vaga):
-    filename = secure_filename(file.filename)
-    path = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(path)
-
-    ext = filename.split(".")[-1].lower()
-    text = extract_text(path, ext)
-
-    try:
-        os.remove(path)
-    except:
-        pass
-
-    if not text.strip():
-        return {"nome": "Erro leitura", "arquivo": filename, "score": "-"}
-
-    result = analyze_resume(text, vaga)
-    result["arquivo"] = filename
-    return result
-
-
-# ========= WORKER BACKGROUND =========
-def background_task(task_id, files, vaga):
+# ========================
+# BACKGROUND PROCESS
+# ========================
+def background_task(task_id, filepaths, vaga):
     results = []
 
+    def process_path(path):
+        try:
+            ext = path.split(".")[-1].lower()
+            text = extract_text(path, ext)
+
+            os.remove(path)
+
+            if not text.strip():
+                return {"nome": "Erro leitura", "arquivo": os.path.basename(path), "score": "-"}
+
+            result = analyze_resume(text, vaga)
+            result["arquivo"] = os.path.basename(path)
+
+            return result
+
+        except Exception as e:
+            return {"nome": "Erro", "arquivo": os.path.basename(path), "score": "-", "status": "Erro"}
+
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(process_file, f, vaga) for f in files]
+        futures = [executor.submit(process_path, p) for p in filepaths]
 
         total = len(futures)
         done = 0
 
         for future in as_completed(futures):
-            result = future.result()
-            results.append(result)
-
+            results.append(future.result())
             done += 1
 
             with tasks_lock:
                 tasks[task_id]["progress"] = int((done / total) * 100)
 
-    results.sort(key=lambda x: float(x.get("score", 0)) if str(x.get("score", "")).isdigit() else -1, reverse=True)
+    results.sort(
+        key=lambda x: float(x.get("score", 0))
+        if str(x.get("score", "")).isdigit() else -1,
+        reverse=True
+    )
 
     with tasks_lock:
         tasks[task_id]["done"] = True
         tasks[task_id]["results"] = results
 
 
-# ========= ROTAS =========
+# ========================
+# ROTAS
+# ========================
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -164,16 +174,26 @@ def processar():
         flash("Descreva a vaga")
         return redirect("/")
 
-    if not files:
+    if not files or all(f.filename == "" for f in files):
         flash("Envie arquivos")
         return redirect("/")
 
     task_id = str(uuid.uuid4())
 
+    saved_files = []
+
+    # 🚀 SALVA ARQUIVOS ANTES DA THREAD (CORREÇÃO DO BUG)
+    for file in files:
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
+            file.save(path)
+            saved_files.append(path)
+
     with tasks_lock:
         tasks[task_id] = {"progress": 0, "done": False, "results": []}
 
-    thread = Thread(target=background_task, args=(task_id, files, vaga))
+    thread = Thread(target=background_task, args=(task_id, saved_files, vaga))
     thread.start()
 
     return redirect(f"/status/{task_id}")
