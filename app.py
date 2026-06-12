@@ -2,7 +2,10 @@ import os
 import re
 import json
 import io
-from flask import Flask, render_template, request, send_file, redirect, url_for, flash
+import uuid
+import threading
+import time
+from flask import Flask, render_template, request, send_file, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -27,6 +30,11 @@ OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_API_KEY else None
+
+# Armazenamento em memória dos jobs de processamento em background
+# Estrutura: { job_id: { "total": int, "done": int, "results": [...], "job_profile": str, "status": "processing"|"done"|"error", "error": str|None } }
+JOBS = {}
+JOBS_LOCK = threading.Lock()
 
 
 def allowed_file(filename):
@@ -173,6 +181,37 @@ Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do 
             "justificativa": f"Erro ao processar com IA: {str(e)[:200]}",
         })
         return fallback
+        def process_job(job_id, filepaths, job_profile):
+    """
+    Função que roda em background (thread) para processar os currículos
+    """
+    try:
+        for filepath in filepaths:
+            ext = filepath.rsplit(".", 1)[1].lower()
+            text = extract_text(filepath, ext)
+
+            result = analyze_resume_with_ai(text, job_profile)
+            result["arquivo"] = os.path.basename(filepath)
+
+            with JOBS_LOCK:
+                JOBS[job_id]["results"].append(result)
+                JOBS[job_id]["done"] += 1
+
+        # Ordena por score (melhor primeiro)
+        def safe_score(x):
+            try:
+                return int(x.get("score", 0))
+            except:
+                return 0
+
+        with JOBS_LOCK:
+            JOBS[job_id]["results"].sort(key=safe_score, reverse=True)
+            JOBS[job_id]["status"] = "done"
+
+    except Exception as e:
+        with JOBS_LOCK:
+            JOBS[job_id]["status"] = "error"
+            JOBS[job_id]["error"] = str(e)
 
 
 @app.route("/", methods=["GET"])
@@ -185,55 +224,85 @@ def processar():
     job_profile = request.form.get("job_profile", "").strip()
     files = request.files.getlist("resumes")
 
-    if not job_profile:
-        flash("Por favor, descreva o perfil da vaga.")
+    if not job_profile or not files or files[0].filename == "":
+        flash("Preencha o perfil da vaga e selecione pelo menos um currículo.")
         return redirect(url_for("index"))
 
-    if not files or all(f.filename == "" for f in files):
-        flash("Por favor, anexe ao menos um currículo.")
-        return redirect(url_for("index"))
+    saved_paths = []
 
-    results = []
-
+    # Salva os arquivos
     for file in files:
         if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
+            filename = f"{uuid.uuid4()}_{secure_filename(file.filename)}"
             filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             file.save(filepath)
+            saved_paths.append(filepath)
 
-            ext = filename.rsplit(".", 1)[1].lower()
-            text = extract_text(filepath, ext)
+    if not saved_paths:
+        flash("Nenhum arquivo válido foi enviado.")
+        return redirect(url_for("index"))
 
-            if not text.strip():
-                results.append({
-                    "arquivo": filename,
-                    "nome": "Não foi possível ler o arquivo",
-                    "whatsapp": "-",
-                    "email": "-",
-                    "score": "-",
-                    "status": "Erro de leitura",
-                    "justificativa": "O texto não pôde ser extraído (arquivo pode estar escaneado/imagem).",
-                })
-            else:
-                analysis = analyze_resume_with_ai(text, job_profile)
-                analysis["arquivo"] = filename
-                results.append(analysis)
+    job_id = str(uuid.uuid4())
 
-            try:
-                os.remove(filepath)
-            except OSError:
-                pass
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "total": len(saved_paths),
+            "done": 0,
+            "results": [],
+            "job_profile": job_profile,
+            "status": "processing",
+            "error": None,
+        }
 
-    # Ordena por score (maior primeiro), tratando valores não numéricos
-    def sort_key(r):
-        try:
-            return float(r.get("score", 0))
-        except (ValueError, TypeError):
-            return -1
+    # Cria thread em background
+    thread = threading.Thread(
+        target=process_job,
+        args=(job_id, saved_paths, job_profile),
+        daemon=True
+    )
+    thread.start()
 
-    results.sort(key=sort_key, reverse=True)
+    # Redireciona para página de progresso
+    return redirect(url_for("progresso", job_id=job_id))
 
-    return render_template("resultado.html", results=results, job_profile=job_profile)
+
+@app.route("/progresso/<job_id>")
+def progresso(job_id):
+    return render_template("progresso.html", job_id=job_id)
+
+
+@app.route("/status/<job_id>")
+def status(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+
+    if not job:
+        return jsonify({"error": "Job não encontrado"}), 404
+
+    return jsonify({
+        "total": job["total"],
+        "done": job["done"],
+        "status": job["status"]
+    })
+
+
+@app.route("/resultado/<job_id>")
+def resultado(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+
+    if not job:
+        flash("Job não encontrado.")
+        return redirect(url_for("index"))
+
+    if job["status"] != "done":
+        return redirect(url_for("progresso", job_id=job_id))
+
+    return render_template(
+        "resultado.html",
+        results=job["results"],
+        job_profile=job["job_profile"]
+    )
 
 
 @app.route("/exportar", methods=["POST"])
@@ -243,47 +312,21 @@ def exportar():
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Candidatos"
+    ws.title = "Resultados"
 
-    headers = ["Nome do Candidato", "WhatsApp", "Email", "Score (%)", "Status", "Justificativa", "Arquivo"]
+    headers = ["Nome", "WhatsApp", "Email", "Score", "Status", "Justificativa", "Arquivo"]
     ws.append(headers)
-
-    header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF")
-    for cell in ws[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
 
     for r in results:
         ws.append([
-            r.get("nome", ""),
-            r.get("whatsapp", ""),
-            r.get("email", ""),
-            r.get("score", ""),
-            r.get("status", ""),
-            r.get("justificativa", ""),
-            r.get("arquivo", ""),
+            r.get("nome"),
+            r.get("whatsapp"),
+            r.get("email"),
+            r.get("score"),
+            r.get("status"),
+            r.get("justificativa"),
+            r.get("arquivo"),
         ])
-
-        # Colorir linha conforme status
-        row_idx = ws.max_row
-        status_val = str(r.get("status", "")).lower()
-        if "recomendado" in status_val and "não" not in status_val and "nao" not in status_val:
-            fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
-        elif "não recomendado" in status_val or "nao recomendado" in status_val:
-            fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
-        else:
-            fill = None
-
-        if fill:
-            for cell in ws[row_idx]:
-                cell.fill = fill
-
-    # Ajusta largura das colunas
-    widths = [28, 18, 28, 10, 18, 60, 25]
-    for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
     output = io.BytesIO()
     wb.save(output)
@@ -291,9 +334,8 @@ def exportar():
 
     return send_file(
         output,
-        as_attachment=True,
-        download_name="candidatos_analisados.xlsx",
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        download_name="resultados.xlsx",
+        as_attachment=True
     )
 
 
