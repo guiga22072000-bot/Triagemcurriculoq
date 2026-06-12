@@ -136,7 +136,22 @@ Analise o currículo do candidato em relação ao perfil da vaga e retorne SOMEN
   "justificativa": "Breve justificativa de 1 a 3 frases explicando o motivo do score, citando pontos fortes e lacunas em relação à vaga"
 }}
 
-Seja criterioso, justo e objetivo na análise. Considere experiência, habilidades técnicas, formação e aderência ao perfil descrito.
+Seja extremamente criterioso e crítico na análise.
+
+Atribua notas mais realistas (evite inflar scores).
+Candidates medianos devem ficar entre 50-70.
+Somente perfis realmente fortes devem ultrapassar 80.
+
+Considere:
+- aderência técnica real
+- experiência prática comprovada
+- profundidade das habilidades
+- coerência profissional
+
+Se faltarem requisitos importantes, reduza significativamente o score.
+
+Evite avaliações genéricas ou superficiais.
+Justifique de forma objetiva os pontos fortes e as lacunas.
 
 Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do LinkedIn ou de um modelo com colunas, onde palavras como "Contato", "Perfil", "Resumo" ou ícones de seção podem aparecer coladas ao nome. Extraia APENAS o nome próprio da pessoa (ex: "Roseni Leão", não "Contato Roseni Leão").
 """
