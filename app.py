@@ -15,12 +15,14 @@ import docx
 
 from openai import OpenAI
 
+# ========================
+# CONFIG
+# ========================
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt"}
-
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
@@ -29,11 +31,10 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-MAX_WORKERS = 4
+MAX_WORKERS = 2  # 🔥 importante pra estabilidade
 
 tasks = {}
 tasks_lock = Lock()
-
 
 # ========================
 # HELPERS
@@ -46,7 +47,7 @@ def extract_text_from_pdf(filepath):
     text = ""
     try:
         with pdfplumber.open(filepath) as pdf:
-            for page in pdf.pages[:5]:
+            for page in pdf.pages[:10]:
                 t = page.extract_text()
                 if t:
                     text += t + "\n"
@@ -59,7 +60,7 @@ def extract_text_from_docx(filepath):
     text = ""
     try:
         doc = docx.Document(filepath)
-        for para in doc.paragraphs[:200]:
+        for para in doc.paragraphs[:300]:
             text += para.text + "\n"
     except:
         pass
@@ -74,43 +75,91 @@ def extract_text(filepath, ext):
     return ""
 
 
+def regex_fallback_extract(text):
+    email = re.search(r"[^@\s]+@[^@\s]+", text)
+    phone = re.search(r"\(?\d{2}\)?\s?\d{4,5}-?\d{4}", text)
+
+    return {
+        "nome": text.split("\n")[0][:80],
+        "whatsapp": phone.group(0) if phone else "Não encontrado",
+        "email": email.group(0) if email else "Não encontrado"
+    }
+
 # ========================
-# IA
+# IA FORTE
 # ========================
 def analyze_resume(text, vaga):
     if not client:
         return {"nome": "Sem API", "score": "-", "status": "-", "justificativa": "API não configurada"}
 
     prompt = f"""
-VAGA:
+Você é um analista de RH especializado.
+
+PERFIL DA VAGA:
+\"\"\"
 {vaga}
+\"\"\"
 
-CURRICULO:
-{text[:8000]}
+CURRÍCULO:
+\"\"\"
+{text[:12000]}
+\"\"\"
 
-Retorne JSON: nome, whatsapp, email, score, status, justificativa
+Retorne SOMENTE JSON válido:
+
+{{
+  "nome": "",
+  "whatsapp": "",
+  "email": "",
+  "score": "",
+  "status": "",
+  "justificativa": ""
+}}
+
+Regras:
+- Score 0 a 100
+- >=60 = Recomendado
+- Seja crítico
+- Avalie aderência real
 """
 
     try:
         res = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            timeout=20
+            messages=[
+                {"role": "system", "content": "Responda somente JSON válido."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            timeout=40
         )
 
         content = res.choices[0].message.content.strip()
 
-        content = re.sub(r"```.*?```", "", content, flags=re.DOTALL).strip()
+        # limpeza forte
+        content = re.sub(r"^```json", "", content).strip()
+        content = re.sub(r"^```", "", content).strip()
+        content = re.sub(r"```$", "", content).strip()
 
         data = json.loads(content)
 
-        return data
-    except:
-        return {"nome": "Erro IA", "score": "-", "status": "Erro", "justificativa": "Falha IA"}
+        for k in ["nome", "whatsapp", "email", "score", "status", "justificativa"]:
+            if k not in data:
+                data[k] = "N/A"
 
+        return data
+
+    except Exception as e:
+        fallback = regex_fallback_extract(text)
+        fallback.update({
+            "score": "-",
+            "status": "Erro IA",
+            "justificativa": str(e)[:200]
+        })
+        return fallback
 
 # ========================
-# BACKGROUND PROCESS
+# PROCESSAMENTO BACKGROUND
 # ========================
 def background_task(task_id, filepaths, vaga):
     results = []
@@ -119,19 +168,22 @@ def background_task(task_id, filepaths, vaga):
         try:
             ext = path.split(".")[-1].lower()
             text = extract_text(path, ext)
-
             os.remove(path)
 
             if not text.strip():
                 return {"nome": "Erro leitura", "arquivo": os.path.basename(path), "score": "-"}
 
-            result = analyze_resume(text, vaga)
-            result["arquivo"] = os.path.basename(path)
+            # 🔥 retry automático
+            for _ in range(2):
+                result = analyze_resume(text, vaga)
+                if result.get("status") != "Erro IA":
+                    break
 
+            result["arquivo"] = os.path.basename(path)
             return result
 
-        except Exception as e:
-            return {"nome": "Erro", "arquivo": os.path.basename(path), "score": "-", "status": "Erro"}
+        except:
+            return {"nome": "Erro", "arquivo": os.path.basename(path), "score": "-"}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(process_path, p) for p in filepaths]
@@ -147,15 +199,13 @@ def background_task(task_id, filepaths, vaga):
                 tasks[task_id]["progress"] = int((done / total) * 100)
 
     results.sort(
-        key=lambda x: float(x.get("score", 0))
-        if str(x.get("score", "")).isdigit() else -1,
+        key=lambda x: float(x.get("score", 0)) if str(x.get("score")).isdigit() else -1,
         reverse=True
     )
 
     with tasks_lock:
         tasks[task_id]["done"] = True
         tasks[task_id]["results"] = results
-
 
 # ========================
 # ROTAS
@@ -179,10 +229,8 @@ def processar():
         return redirect("/")
 
     task_id = str(uuid.uuid4())
-
     saved_files = []
 
-    # 🚀 SALVA ARQUIVOS ANTES DA THREAD (CORREÇÃO DO BUG)
     for file in files:
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
@@ -209,13 +257,7 @@ def progresso(task_id):
     with tasks_lock:
         task = tasks.get(task_id)
 
-    if not task:
-        return jsonify({"error": "not found"}), 404
-
-    return jsonify({
-        "progress": task["progress"],
-        "done": task["done"]
-    })
+    return jsonify(task if task else {"error": "not found"})
 
 
 @app.route("/resultado/<task_id>")
@@ -236,10 +278,17 @@ def exportar():
     wb = openpyxl.Workbook()
     ws = wb.active
 
-    ws.append(["Nome", "Score", "Status", "Arquivo"])
+    ws.append(["Nome", "WhatsApp", "Email", "Score", "Status", "Arquivo"])
 
     for r in results:
-        ws.append([r.get("nome"), r.get("score"), r.get("status"), r.get("arquivo")])
+        ws.append([
+            r.get("nome"),
+            r.get("whatsapp"),
+            r.get("email"),
+            r.get("score"),
+            r.get("status"),
+            r.get("arquivo")
+        ])
 
     output = io.BytesIO()
     wb.save(output)
@@ -248,5 +297,6 @@ def exportar():
     return send_file(output, as_attachment=True, download_name="candidatos.xlsx")
 
 
+# ========================
 if __name__ == "__main__":
     app.run(debug=False)
