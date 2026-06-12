@@ -277,24 +277,77 @@ def exportar():
 
     wb = openpyxl.Workbook()
     ws = wb.active
+    ws.title = "Candidatos"
 
-    ws.append(["Nome", "WhatsApp", "Email", "Score", "Status", "Arquivo"])
+    # ✅ Cabeçalhos CORRETOS (igual sua tela)
+    headers = [
+        "Nome do Candidato",
+        "WhatsApp",
+        "Email",
+        "Score (%)",
+        "Status",
+        "Justificativa",
+        "Arquivo"
+    ]
 
+    ws.append(headers)
+
+    # ✅ Estilo do header
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # ✅ Preenche dados corretamente
     for r in results:
         ws.append([
-            r.get("nome"),
-            r.get("whatsapp"),
-            r.get("email"),
-            r.get("score"),
-            r.get("status"),
-            r.get("arquivo")
+            r.get("nome", ""),
+            r.get("whatsapp", ""),
+            r.get("email", ""),
+            r.get("score", ""),
+            r.get("status", ""),
+            r.get("justificativa", ""),  # 🔥 AQUI ESTÁ A CHAVE
+            r.get("arquivo", "")
         ])
+
+        # ✅ Cor por status
+        row_idx = ws.max_row
+        status_val = str(r.get("status", "")).lower()
+
+        if "recomendado" in status_val and "não" not in status_val:
+            fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+        else:
+            fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+
+        for cell in ws[row_idx]:
+            cell.fill = fill
+
+    # ✅ Ajuste de largura (MUITO IMPORTANTE pra justificativa aparecer)
+    widths = [30, 20, 30, 12, 18, 80, 30]
+
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    # ✅ Wrap text na justificativa (fica igual seu exemplo bonito)
+    for row in ws.iter_rows(min_row=2, min_col=6, max_col=6):
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True)
 
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
 
-    return send_file(output, as_attachment=True, download_name="candidatos.xlsx")
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="candidatos_analisados.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 # ========================
