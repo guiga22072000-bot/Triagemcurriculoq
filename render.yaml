@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: analise-curriculos-ia
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: SECRET_KEY
+        generateValue: true
