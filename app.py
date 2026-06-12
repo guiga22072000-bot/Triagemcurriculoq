@@ -128,7 +128,7 @@ CURRÍCULO DO CANDIDATO (texto extraído de um arquivo, pode conter ruídos de f
 Analise o currículo do candidato em relação ao perfil da vaga e retorne SOMENTE um JSON válido (sem markdown, sem texto adicional) com os seguintes campos:
 
 {{
-  "nome": "Nome completo do candidato (extraído do currículo)",
+  "nome": "Nome completo do candidato (apenas o nome próprio da pessoa, sem prefixos como 'Contato', 'Currículo de', rótulos de seção ou textos de cabeçalho/rodapé)",
   "whatsapp": "Número de telefone/WhatsApp do candidato (ou 'Não encontrado')",
   "email": "Email do candidato (ou 'Não encontrado')",
   "score": "Número de 0 a 100 representando o percentual de compatibilidade do candidato com a vaga",
@@ -137,6 +137,8 @@ Analise o currículo do candidato em relação ao perfil da vaga e retorne SOMEN
 }}
 
 Seja criterioso, justo e objetivo na análise. Considere experiência, habilidades técnicas, formação e aderência ao perfil descrito.
+
+Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do LinkedIn ou de um modelo com colunas, onde palavras como "Contato", "Perfil", "Resumo" ou ícones de seção podem aparecer coladas ao nome. Extraia APENAS o nome próprio da pessoa (ex: "Roseni Leão", não "Contato Roseni Leão").
 """
 
     try:
