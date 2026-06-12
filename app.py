@@ -144,7 +144,22 @@ Analise o currículo do candidato em relação ao perfil da vaga e retorne SOMEN
   "justificativa": "Breve justificativa de 1 a 3 frases explicando o motivo do score, citando pontos fortes e lacunas em relação à vaga"
 }}
 
-Seja criterioso, justo e objetivo na análise. Considere experiência, habilidades técnicas, formação e aderência ao perfil descrito.
+Seja extremamente criterioso e crítico na análise.
+
+Atribua notas mais realistas (evite inflar scores).
+Candidates medianos devem ficar entre 50-70.
+Somente perfis realmente fortes devem ultrapassar 80.
+
+Considere:
+- aderência técnica real
+- experiência prática comprovada
+- profundidade das habilidades
+- coerência profissional
+
+Se faltarem requisitos importantes, reduza significativamente o score.
+
+Evite avaliações genéricas ou superficiais.
+Justifique de forma objetiva os pontos fortes e as lacunas.
 
 Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do LinkedIn ou de um modelo com colunas, onde palavras como "Contato", "Perfil", "Resumo" ou ícones de seção podem aparecer coladas ao nome. Extraia APENAS o nome próprio da pessoa (ex: "Roseni Leão", não "Contato Roseni Leão").
 """
@@ -186,7 +201,39 @@ Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do 
     Função que roda em background (thread) para processar os currículos
     """
     try:
-        for filepath in filepaths:
+        from concurrent.futures import ThreadPoolExecutor
+
+def process_job(job_id, filepaths, job_profile):
+    try:
+        def process_single(filepath):
+            ext = filepath.rsplit(".", 1)[1].lower()
+            text = extract_text(filepath, ext)
+
+            result = analyze_resume_with_ai(text, job_profile)
+            result["arquivo"] = os.path.basename(filepath)
+
+            with JOBS_LOCK:
+                JOBS[job_id]["results"].append(result)
+                JOBS[job_id]["done"] += 1
+
+        # 🔥 roda até 3 currículos ao mesmo tempo (evita travar API)
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            executor.map(process_single, filepaths)
+
+        def safe_score(x):
+            try:
+                return int(x.get("score", 0))
+            except:
+                return 0
+
+        with JOBS_LOCK:
+            JOBS[job_id]["results"].sort(key=safe_score, reverse=True)
+            JOBS[job_id]["status"] = "done"
+
+    except Exception as e:
+        with JOBS_LOCK:
+            JOBS[job_id]["status"] = "error"
+            JOBS[job_id]["error"] = str(e)
             ext = filepath.rsplit(".", 1)[1].lower()
             text = extract_text(filepath, ext)
 
