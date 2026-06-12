@@ -21,7 +21,7 @@ ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt"}
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ConfiguraÃ§Ã£o da API (OpenAI ou compatÃ­vel)
+# Configuração da API (OpenAI ou compatível)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
@@ -81,26 +81,26 @@ def extract_text(filepath, ext):
 
 
 def regex_fallback_extract(text):
-    """ExtraÃ§Ã£o simples por regex como fallback, caso a IA falhe."""
+    """Extração simples por regex como fallback, caso a IA falhe."""
     email_match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
     phone_match = re.search(
         r"(\+?\d{1,3}[\s.-]?)?\(?\d{2}\)?[\s.-]?\d{4,5}[\s.-]?\d{4}", text
     )
-    # Nome: tenta pegar a primeira linha nÃ£o vazia significativa
+    # Nome: tenta pegar a primeira linha não vazia significativa
     first_lines = [l.strip() for l in text.split("\n") if l.strip()]
-    name = first_lines[0] if first_lines else "NÃ£o identificado"
+    name = first_lines[0] if first_lines else "Não identificado"
 
     return {
         "nome": name[:80],
-        "whatsapp": phone_match.group(0) if phone_match else "NÃ£o encontrado",
-        "email": email_match.group(0) if email_match else "NÃ£o encontrado",
+        "whatsapp": phone_match.group(0) if phone_match else "Não encontrado",
+        "email": email_match.group(0) if email_match else "Não encontrado",
     }
 
 
 def analyze_resume_with_ai(resume_text, job_profile):
     """
     Usa IA para extrair dados do candidato e avaliar compatibilidade com a vaga.
-    Retorna um dicionÃ¡rio com nome, whatsapp, email, score, status, justificativa.
+    Retorna um dicionário com nome, whatsapp, email, score, status, justificativa.
     """
     if not client:
         # Sem chave de API configurada -> usa fallback simples
@@ -108,57 +108,57 @@ def analyze_resume_with_ai(resume_text, job_profile):
         fallback.update({
             "score": "N/A",
             "status": "Configurar API Key",
-            "justificativa": "Chave da API de IA nÃ£o configurada no servidor.",
+            "justificativa": "Chave da API de IA não configurada no servidor.",
         })
         return fallback
 
     prompt = f"""
-VocÃª Ã© um analista de RH especializado em recrutamento e seleÃ§Ã£o.
+Você é um analista de RH especializado em recrutamento e seleção.
 
 PERFIL DA VAGA (requisitos definidos pela empresa):
 \"\"\"
 {job_profile}
 \"\"\"
 
-CURRÃCULO DO CANDIDATO (texto extraÃ­do de um arquivo, pode conter ruÃ­dos de formataÃ§Ã£o):
+CURRÍCULO DO CANDIDATO (texto extraído de um arquivo, pode conter ruídos de formatação):
 \"\"\"
 {resume_text[:12000]}
 \"\"\"
 
-Analise o currÃ­culo do candidato em relaÃ§Ã£o ao perfil da vaga e retorne SOMENTE um JSON vÃ¡lido (sem markdown, sem texto adicional) com os seguintes campos:
+Analise o currículo do candidato em relação ao perfil da vaga e retorne SOMENTE um JSON válido (sem markdown, sem texto adicional) com os seguintes campos:
 
 {{
-  "nome": "Nome completo do candidato (apenas o nome prÃ³prio da pessoa, sem prefixos como 'Contato', 'CurrÃ­culo de', rÃ³tulos de seÃ§Ã£o ou textos de cabeÃ§alho/rodapÃ©)",
-  "whatsapp": "NÃºmero de telefone/WhatsApp do candidato (ou 'NÃ£o encontrado')",
-  "email": "Email do candidato (ou 'NÃ£o encontrado')",
-  "score": "NÃºmero de 0 a 100 representando o percentual de compatibilidade do candidato com a vaga",
-  "status": "Recomendado ou NÃ£o recomendado, com base no score (>=60 = Recomendado)",
-  "justificativa": "Breve justificativa de 1 a 3 frases explicando o motivo do score, citando pontos fortes e lacunas em relaÃ§Ã£o Ã  vaga"
+  "nome": "Nome completo do candidato (apenas o nome próprio da pessoa, sem prefixos como 'Contato', 'Currículo de', rótulos de seção ou textos de cabeçalho/rodapé)",
+  "whatsapp": "Número de telefone/WhatsApp do candidato (ou 'Não encontrado')",
+  "email": "Email do candidato (ou 'Não encontrado')",
+  "score": "Número de 0 a 100 representando o percentual de compatibilidade do candidato com a vaga",
+  "status": "Recomendado ou Não recomendado, com base no score (>=60 = Recomendado)",
+  "justificativa": "Breve justificativa de 1 a 3 frases explicando o motivo do score, citando pontos fortes e lacunas em relação à vaga"
 }}
 
-Seja criterioso, justo e objetivo na anÃ¡lise. Considere experiÃªncia, habilidades tÃ©cnicas, formaÃ§Ã£o e aderÃªncia ao perfil descrito.
+Seja criterioso, justo e objetivo na análise. Considere experiência, habilidades técnicas, formação e aderência ao perfil descrito.
 
-AtenÃ§Ã£o especial ao extrair o "nome": o texto pode vir de um PDF exportado do LinkedIn ou de um modelo com colunas, onde palavras como "Contato", "Perfil", "Resumo" ou Ã­cones de seÃ§Ã£o podem aparecer coladas ao nome. Extraia APENAS o nome prÃ³prio da pessoa (ex: "Roseni LeÃ£o", nÃ£o "Contato Roseni LeÃ£o").
+Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do LinkedIn ou de um modelo com colunas, onde palavras como "Contato", "Perfil", "Resumo" ou ícones de seção podem aparecer coladas ao nome. Extraia APENAS o nome próprio da pessoa (ex: "Roseni Leão", não "Contato Roseni Leão").
 """
 
     try:
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": "VocÃª responde apenas com JSON vÃ¡lido, sem formataÃ§Ã£o markdown."},
+                {"role": "system", "content": "Você responde apenas com JSON válido, sem formatação markdown."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.2,
         )
         content = response.choices[0].message.content.strip()
 
-        # Remove possÃ­veis blocos de markdown
+        # Remove possíveis blocos de markdown
         content = re.sub(r"^```(json)?", "", content).strip()
         content = re.sub(r"```$", "", content).strip()
 
         data = json.loads(content)
 
-        # Garante campos obrigatÃ³rios
+        # Garante campos obrigatórios
         for key in ["nome", "whatsapp", "email", "score", "status", "justificativa"]:
             if key not in data:
                 data[key] = "N/A"
@@ -169,7 +169,7 @@ AtenÃ§Ã£o especial ao extrair o "nome": o texto pode vir de um PDF exportado
         fallback = regex_fallback_extract(resume_text)
         fallback.update({
             "score": "Erro",
-            "status": "Erro na anÃ¡lise",
+            "status": "Erro na análise",
             "justificativa": f"Erro ao processar com IA: {str(e)[:200]}",
         })
         return fallback
@@ -190,7 +190,7 @@ def processar():
         return redirect(url_for("index"))
 
     if not files or all(f.filename == "" for f in files):
-        flash("Por favor, anexe ao menos um currÃ­culo.")
+        flash("Por favor, anexe ao menos um currículo.")
         return redirect(url_for("index"))
 
     results = []
@@ -207,12 +207,12 @@ def processar():
             if not text.strip():
                 results.append({
                     "arquivo": filename,
-                    "nome": "NÃ£o foi possÃ­vel ler o arquivo",
+                    "nome": "Não foi possível ler o arquivo",
                     "whatsapp": "-",
                     "email": "-",
                     "score": "-",
                     "status": "Erro de leitura",
-                    "justificativa": "O texto nÃ£o pÃ´de ser extraÃ­do (arquivo pode estar escaneado/imagem).",
+                    "justificativa": "O texto não pôde ser extraído (arquivo pode estar escaneado/imagem).",
                 })
             else:
                 analysis = analyze_resume_with_ai(text, job_profile)
@@ -224,7 +224,7 @@ def processar():
             except OSError:
                 pass
 
-    # Ordena por score (maior primeiro), tratando valores nÃ£o numÃ©ricos
+    # Ordena por score (maior primeiro), tratando valores não numéricos
     def sort_key(r):
         try:
             return float(r.get("score", 0))
@@ -269,9 +269,9 @@ def exportar():
         # Colorir linha conforme status
         row_idx = ws.max_row
         status_val = str(r.get("status", "")).lower()
-        if "recomendado" in status_val and "nÃ£o" not in status_val and "nao" not in status_val:
+        if "recomendado" in status_val and "não" not in status_val and "nao" not in status_val:
             fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
-        elif "nÃ£o recomendado" in status_val or "nao recomendado" in status_val:
+        elif "não recomendado" in status_val or "nao recomendado" in status_val:
             fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
         else:
             fill = None
@@ -300,4 +300,3 @@ def exportar():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
-
