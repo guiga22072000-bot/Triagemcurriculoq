@@ -31,7 +31,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-MAX_WORKERS = 2  # 🔥 importante pra estabilidade
+MAX_WORKERS = 2
 
 tasks = {}
 tasks_lock = Lock()
@@ -78,19 +78,27 @@ def extract_text(filepath, ext):
 def regex_fallback_extract(text):
     email = re.search(r"[^@\s]+@[^@\s]+", text)
     phone = re.search(r"\(?\d{2}\)?\s?\d{4,5}-?\d{4}", text)
+    linkedin = re.search(r"https?://(www\.)?linkedin\.com/in/[^\s]+", text)
 
     return {
         "nome": text.split("\n")[0][:80],
         "whatsapp": phone.group(0) if phone else "Não encontrado",
-        "email": email.group(0) if email else "Não encontrado"
+        "email": email.group(0) if email else "Não encontrado",
+        "linkedin": linkedin.group(0) if linkedin else "Não encontrado"
     }
 
 # ========================
-# IA FORTE
+# IA
 # ========================
 def analyze_resume(text, vaga):
     if not client:
-        return {"nome": "Sem API", "score": "-", "status": "-", "justificativa": "API não configurada"}
+        return {
+            "nome": "Sem API",
+            "score": "-",
+            "status": "-",
+            "justificativa": "API não configurada",
+            "linkedin": "-"
+        }
 
     prompt = f"""
 Você é um analista de RH especializado.
@@ -111,6 +119,7 @@ Retorne SOMENTE JSON válido:
   "nome": "",
   "whatsapp": "",
   "email": "",
+  "linkedin": "",
   "score": "",
   "status": "",
   "justificativa": ""
@@ -121,6 +130,7 @@ Regras:
 - >=60 = Recomendado
 - Seja crítico
 - Avalie aderência real
+- "linkedin": URL contendo linkedin.com/in ou "Não encontrado"
 """
 
     try:
@@ -136,14 +146,13 @@ Regras:
 
         content = res.choices[0].message.content.strip()
 
-        # limpeza forte
         content = re.sub(r"^```json", "", content).strip()
         content = re.sub(r"^```", "", content).strip()
         content = re.sub(r"```$", "", content).strip()
 
         data = json.loads(content)
 
-        for k in ["nome", "whatsapp", "email", "score", "status", "justificativa"]:
+        for k in ["nome", "whatsapp", "email", "linkedin", "score", "status", "justificativa"]:
             if k not in data:
                 data[k] = "N/A"
 
@@ -159,7 +168,7 @@ Regras:
         return fallback
 
 # ========================
-# PROCESSAMENTO BACKGROUND
+# PROCESSAMENTO
 # ========================
 def background_task(task_id, filepaths, vaga):
     results = []
@@ -173,7 +182,6 @@ def background_task(task_id, filepaths, vaga):
             if not text.strip():
                 return {"nome": "Erro leitura", "arquivo": os.path.basename(path), "score": "-"}
 
-            # 🔥 retry automático
             for _ in range(2):
                 result = analyze_resume(text, vaga)
                 if result.get("status") != "Erro IA":
@@ -279,11 +287,11 @@ def exportar():
     ws = wb.active
     ws.title = "Candidatos"
 
-    # ✅ Cabeçalhos CORRETOS (igual sua tela)
     headers = [
         "Nome do Candidato",
         "WhatsApp",
         "Email",
+        "LinkedIn",
         "Score (%)",
         "Status",
         "Justificativa",
@@ -292,7 +300,6 @@ def exportar():
 
     ws.append(headers)
 
-    # ✅ Estilo do header
     from openpyxl.styles import Font, PatternFill, Alignment
 
     header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
@@ -303,19 +310,18 @@ def exportar():
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # ✅ Preenche dados corretamente
     for r in results:
         ws.append([
             r.get("nome", ""),
             r.get("whatsapp", ""),
             r.get("email", ""),
+            r.get("linkedin", ""),
             r.get("score", ""),
             r.get("status", ""),
-            r.get("justificativa", ""),  # 🔥 AQUI ESTÁ A CHAVE
+            r.get("justificativa", ""),
             r.get("arquivo", "")
         ])
 
-        # ✅ Cor por status
         row_idx = ws.max_row
         status_val = str(r.get("status", "")).lower()
 
@@ -327,14 +333,12 @@ def exportar():
         for cell in ws[row_idx]:
             cell.fill = fill
 
-    # ✅ Ajuste de largura (MUITO IMPORTANTE pra justificativa aparecer)
-    widths = [30, 20, 30, 12, 18, 80, 30]
+    widths = [30, 20, 30, 40, 12, 18, 80, 30]
 
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
-    # ✅ Wrap text na justificativa (fica igual seu exemplo bonito)
-    for row in ws.iter_rows(min_row=2, min_col=6, max_col=6):
+    for row in ws.iter_rows(min_row=2, min_col=7, max_col=7):
         for cell in row:
             cell.alignment = Alignment(wrap_text=True)
 
