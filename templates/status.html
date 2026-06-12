@@ -1,0 +1,27 @@
+<h2>Processando currículos...</h2>
+
+<div style="width: 100%; background: #eee;">
+  <div id="barra" style="width:0%; height:30px; background:green;"></div>
+</div>
+
+<p id="texto">0%</p>
+
+<script>
+const taskId = "{{ task_id }}";
+
+async function atualizar() {
+  const res = await fetch(`/progresso/${taskId}`);
+  const data = await res.json();
+
+  document.getElementById("barra").style.width = data.progress + "%";
+  document.getElementById("texto").innerText = data.progress + "%";
+
+  if (data.done) {
+    window.location = "/resultado/" + taskId;
+  } else {
+    setTimeout(atualizar, 1000);
+  }
+}
+
+atualizar();
+</script>
