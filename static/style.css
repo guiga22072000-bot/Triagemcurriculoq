@@ -256,3 +256,18 @@ th {
   font-size: 12px;
   word-break: break-all;
 }
+.progress-bar-wrapper {
+  background: #e0e0e0;
+  border-radius: 8px;
+  height: 28px;
+  width: 100%;
+  margin-top: 20px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #1F4E79, #2e86de);
+  border-radius: 8px;
+  transition: width 0.6s ease;
+}
