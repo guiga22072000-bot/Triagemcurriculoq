@@ -19,9 +19,11 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 
 UPLOAD_FOLDER = "uploads"
+JOBS_FOLDER = "jobs"
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt"}
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(JOBS_FOLDER, exist_ok=True)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -29,8 +31,26 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_API_KEY else None
 
-JOBS = {}
 JOBS_LOCK = threading.Lock()
+
+
+def job_path(job_id):
+    return os.path.join(JOBS_FOLDER, f"{job_id}.json")
+
+
+def save_job(job_id, data):
+    with JOBS_LOCK:
+        with open(job_path(job_id), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+
+
+def load_job(job_id):
+    path = job_path(job_id)
+    if not os.path.exists(path):
+        return None
+    with JOBS_LOCK:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
 
 def allowed_file(filename):
@@ -132,7 +152,6 @@ Analise o currículo do candidato em relação ao perfil da vaga e retorne SOMEN
   "justificativa": "Breve justificativa de 1 a 3 frases explicando o motivo do score, citando pontos fortes e lacunas em relação à vaga"
 }}
 
-
 Seja extremamente criterioso e crítico na análise.
 
 Atribua notas mais realistas (evite inflar scores).
@@ -149,7 +168,6 @@ Se faltarem requisitos importantes, reduza significativamente o score.
 
 Evite avaliações genéricas ou superficiais.
 Justifique de forma objetiva os pontos fortes e as lacunas.
-
 
 Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do LinkedIn ou de um modelo com colunas, onde palavras como "Contato", "Perfil", "Resumo" ou ícones de seção podem aparecer coladas ao nome. Extraia APENAS o nome próprio da pessoa (ex: "Roseni Leão", não "Contato Roseni Leão").
 """
@@ -183,14 +201,14 @@ Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do 
 
 
 def process_resumes_background(job_id, filepaths_exts, job_profile):
-    """Processa os currículos em background, atualizando o job em JOBS."""
     results = []
     total = len(filepaths_exts)
 
-    with JOBS_LOCK:
-        JOBS[job_id]["total"] = total
-        JOBS[job_id]["done"] = 0
-        JOBS[job_id]["status"] = "processing"
+    job = load_job(job_id)
+    job["total"] = total
+    job["done"] = 0
+    job["status"] = "processing"
+    save_job(job_id, job)
 
     for i, (filepath, ext, original_name) in enumerate(filepaths_exts):
         try:
@@ -215,14 +233,16 @@ def process_resumes_background(job_id, filepaths_exts, job_profile):
 
         results.append(result)
 
-        with JOBS_LOCK:
-            JOBS[job_id]["done"] = i + 1
-            JOBS[job_id]["results"] = results
+        job = load_job(job_id)
+        job["done"] = i + 1
+        job["results"] = results
+        save_job(job_id, job)
 
         time.sleep(0.1)
 
-    with JOBS_LOCK:
-        JOBS[job_id]["status"] = "done"
+    job = load_job(job_id)
+    job["status"] = "done"
+    save_job(job_id, job)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -254,15 +274,14 @@ def index():
             return redirect(url_for("index"))
 
         job_id = uuid.uuid4().hex
-        with JOBS_LOCK:
-            JOBS[job_id] = {
-                "total": len(filepaths_exts),
-                "done": 0,
-                "results": [],
-                "job_profile": job_profile,
-                "status": "processing",
-                "error": None,
-            }
+        save_job(job_id, {
+            "total": len(filepaths_exts),
+            "done": 0,
+            "results": [],
+            "job_profile": job_profile,
+            "status": "processing",
+            "error": None,
+        })
 
         thread = threading.Thread(
             target=process_resumes_background,
@@ -278,8 +297,7 @@ def index():
 
 @app.route("/progresso/<job_id>")
 def progresso(job_id):
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
+    job = load_job(job_id)
     if not job:
         flash("Job não encontrado.", "danger")
         return redirect(url_for("index"))
@@ -288,8 +306,7 @@ def progresso(job_id):
 
 @app.route("/status/<job_id>")
 def status(job_id):
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
+    job = load_job(job_id)
     if not job:
         return jsonify({"error": "Job não encontrado"}), 404
     return jsonify({
@@ -302,8 +319,7 @@ def status(job_id):
 
 @app.route("/resultado/<job_id>")
 def resultado(job_id):
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
+    job = load_job(job_id)
     if not job or job["status"] != "done":
         flash("Resultado ainda não disponível.", "warning")
         return redirect(url_for("progresso", job_id=job_id))
