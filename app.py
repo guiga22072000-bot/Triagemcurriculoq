@@ -10,7 +10,6 @@ from werkzeug.utils import secure_filename
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
-# Leitura de PDFs e DOCX
 import pdfplumber
 import docx
 
@@ -24,15 +23,12 @@ ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt"}
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Configuração da API (OpenAI ou compatível)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_API_KEY else None
 
-# Armazenamento em memória dos jobs de processamento em background
-# Estrutura: { job_id: { "total": int, "done": int, "results": [...], "job_profile": str, "status": "processing"|"done"|"error", "error": str|None } }
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
@@ -89,15 +85,12 @@ def extract_text(filepath, ext):
 
 
 def regex_fallback_extract(text):
-    """Extração simples por regex como fallback, caso a IA falhe."""
     email_match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
     phone_match = re.search(
         r"(\+?\d{1,3}[\s.-]?)?\(?\d{2}\)?[\s.-]?\d{4,5}[\s.-]?\d{4}", text
     )
-    # Nome: tenta pegar a primeira linha não vazia significativa
     first_lines = [l.strip() for l in text.split("\n") if l.strip()]
     name = first_lines[0] if first_lines else "Não identificado"
-
     return {
         "nome": name[:80],
         "whatsapp": phone_match.group(0) if phone_match else "Não encontrado",
@@ -106,12 +99,7 @@ def regex_fallback_extract(text):
 
 
 def analyze_resume_with_ai(resume_text, job_profile):
-    """
-    Usa IA para extrair dados do candidato e avaliar compatibilidade com a vaga.
-    Retorna um dicionário com nome, whatsapp, email, score, status, justificativa.
-    """
     if not client:
-        # Sem chave de API configurada -> usa fallback simples
         fallback = regex_fallback_extract(resume_text)
         fallback.update({
             "score": "N/A",
@@ -159,18 +147,12 @@ Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do 
             temperature=0.2,
         )
         content = response.choices[0].message.content.strip()
-
-        # Remove possíveis blocos de markdown
         content = re.sub(r"^```(json)?", "", content).strip()
         content = re.sub(r"```$", "", content).strip()
-
         data = json.loads(content)
-
-        # Garante campos obrigatórios
         for key in ["nome", "whatsapp", "email", "score", "status", "justificativa"]:
             if key not in data:
                 data[key] = "N/A"
-
         return data
 
     except Exception as e:
@@ -181,7 +163,9 @@ Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do 
             "justificativa": f"Erro ao processar com IA: {str(e)[:200]}",
         })
         return fallback
-        def process_resumes_background(job_id, filepaths_exts, job_profile):
+
+
+def process_resumes_background(job_id, filepaths_exts, job_profile):
     """Processa os currículos em background, atualizando o job em JOBS."""
     results = []
     total = len(filepaths_exts)
@@ -218,7 +202,7 @@ Atenção especial ao extrair o "nome": o texto pode vir de um PDF exportado do 
             JOBS[job_id]["done"] = i + 1
             JOBS[job_id]["results"] = results
 
-        time.sleep(0.1)  # Pequena pausa para não sobrecarregar a API
+        time.sleep(0.1)
 
     with JOBS_LOCK:
         JOBS[job_id]["status"] = "done"
@@ -252,7 +236,6 @@ def index():
             flash("Nenhum arquivo válido enviado (aceitos: PDF, DOCX, TXT).", "danger")
             return redirect(url_for("index"))
 
-        # Cria o job e dispara thread
         job_id = uuid.uuid4().hex
         with JOBS_LOCK:
             JOBS[job_id] = {
@@ -309,7 +292,7 @@ def resultado(job_id):
         return redirect(url_for("progresso", job_id=job_id))
 
     results = job["results"]
-    # Ordena por score decrescente
+
     def sort_key(r):
         try:
             return -int(r.get("score", 0))
@@ -357,7 +340,7 @@ def exportar():
         ws.cell(row=row_idx, column=3, value=r.get("whatsapp", ""))
         ws.cell(row=row_idx, column=4, value=r.get("email", ""))
         ws.cell(row=row_idx, column=5, value=r.get("score", ""))
-        status_cell = ws.cell(row=row_idx, column=6, value=r.get("status", ""))
+        ws.cell(row=row_idx, column=6, value=r.get("status", ""))
         ws.cell(row=row_idx, column=7, value=r.get("justificativa", ""))
 
         fill = green_fill if "Recomendado" in str(r.get("status", "")) else red_fill
