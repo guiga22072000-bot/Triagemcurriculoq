@@ -31,7 +31,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 # ✅ SUPABASE (configure depois)
-SUPABASE_URL = "https://djitgqkgypkjfhluqgrd.supabase.co"
+SUPABASE_URL = "https://djitgqkgypkjfhluqgrd.supabase.co/rest/v1/"
 SUPABASE_KEY = "sb_publishable_eJgqpcF1yCDdvweUde5LZg_L2CbXqT_"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL else None
 
