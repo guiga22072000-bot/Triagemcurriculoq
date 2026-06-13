@@ -12,8 +12,8 @@ from werkzeug.utils import secure_filename
 import openpyxl
 import pdfplumber
 import docx
-
 from openai import OpenAI
+from supabase import create_client
 
 # ========================
 # CONFIG
@@ -24,12 +24,16 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt"}
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+# ✅ SUPABASE (configure depois)
+SUPABASE_URL = "https://djitgqkgypkjfhluqgrd.supabase.co"
+SUPABASE_KEY = "sb_publishable_eJgqpcF1yCDdvweUde5LZg_L2CbXqT_"
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL else None
 
 MAX_WORKERS = 2
 
@@ -37,12 +41,16 @@ tasks = {}
 tasks_lock = Lock()
 
 # ========================
-# HELPERS
+# NORMALIZAÇÃO TEXTO 🔥
 # ========================
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+def normalize_text(text):
+    text = re.sub(r"(linkedin\.com/in/)\s*\n\s*", r"\1", text)
+    text = re.sub(r"(https?://[^\s]+)\s*\n\s*([^\s]+)", r"\1\2", text)
+    return text
 
-
+# ========================
+# EXTRAÇÃO
+# ========================
 def extract_text_from_pdf(filepath):
     text = ""
     try:
@@ -75,145 +83,127 @@ def extract_text(filepath, ext):
     return ""
 
 
+# ========================
+# FALLBACK LINKEDIN 🔥
+# ========================
+def extract_linkedin(text):
+    text = normalize_text(text)
+
+    match = re.search(r"(https?://)?(www\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+", text)
+
+    if not match:
+        return "Não encontrado"
+
+    url = match.group(0)
+
+    if not url.startswith("http"):
+        url = "https://" + url
+
+    if not re.search(r"linkedin\.com/in/[A-Za-z0-9\-_%]{3,}", url):
+        return "Não encontrado"
+
+    return url
+
+
 def regex_fallback_extract(text):
     email = re.search(r"[^@\s]+@[^@\s]+", text)
     phone = re.search(r"\(?\d{2}\)?\s?\d{4,5}-?\d{4}", text)
-    linkedin = re.search(r"https?://(www\.)?linkedin\.com/in/[^\s]+", text)
 
     return {
         "nome": text.split("\n")[0][:80],
         "whatsapp": phone.group(0) if phone else "Não encontrado",
         "email": email.group(0) if email else "Não encontrado",
-        "linkedin": linkedin.group(0) if linkedin else "Não encontrado"
+        "linkedin": extract_linkedin(text)
     }
 
 # ========================
 # IA
 # ========================
 def analyze_resume(text, vaga):
+    text = normalize_text(text)
+
     if not client:
-        return {
-            "nome": "Sem API",
-            "score": "-",
-            "status": "-",
-            "justificativa": "API não configurada",
-            "linkedin": "-"
-        }
+        fallback = regex_fallback_extract(text)
+        fallback.update({"score": "-", "status": "-", "justificativa": "Sem API"})
+        return fallback
 
     prompt = f"""
-Você é um analista de RH especializado.
+Você é analista de RH.
 
-PERFIL DA VAGA:
-\"\"\"
+VAGA:
 {vaga}
-\"\"\"
 
 CURRÍCULO:
-\"\"\"
 {text[:12000]}
-\"\"\"
 
-Retorne SOMENTE JSON válido:
+Retorne JSON:
 
 {{
-  "nome": "",
-  "whatsapp": "",
-  "email": "",
-  "linkedin": "",
-  "score": "",
-  "status": "",
-  "justificativa": ""
+"nome":"",
+"whatsapp":"",
+"email":"",
+"linkedin":"",
+"score":"",
+"status":"",
+"justificativa":""
 }}
 
 Regras:
-- Score 0 a 100
-- >=60 = Recomendado
-- Seja crítico
-- Avalie aderência real
-- "linkedin": URL contendo linkedin.com/in ou "Não encontrado"
+- Se LinkedIn estiver em duas linhas, reconstruir
+- Se estiver como /in/ apenas → ignorar
 """
 
     try:
         res = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Responda somente JSON válido."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            timeout=40
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
         )
 
-        content = res.choices[0].message.content.strip()
+        data = json.loads(res.choices[0].message.content)
 
-        content = re.sub(r"^```json", "", content).strip()
-        content = re.sub(r"^```", "", content).strip()
-        content = re.sub(r"```$", "", content).strip()
-
-        data = json.loads(content)
-
-        for k in ["nome", "whatsapp", "email", "linkedin", "score", "status", "justificativa"]:
-            if k not in data:
-                data[k] = "N/A"
+        # fallback forte de linkedin
+        if not data.get("linkedin") or "linkedin.com/in/" not in data.get("linkedin"):
+            data["linkedin"] = extract_linkedin(text)
 
         return data
 
-    except Exception as e:
+    except:
         fallback = regex_fallback_extract(text)
-        fallback.update({
-            "score": "-",
-            "status": "Erro IA",
-            "justificativa": str(e)[:200]
-        })
+        fallback.update({"score": "-", "status": "Erro IA"})
         return fallback
 
 # ========================
 # PROCESSAMENTO
 # ========================
-def background_task(task_id, filepaths, vaga):
+def background_task(task_id, files, vaga, job_title):
+
     results = []
 
-    def process_path(path):
-        try:
-            ext = path.split(".")[-1].lower()
-            text = extract_text(path, ext)
-            os.remove(path)
+    def process(path):
+        ext = path.split(".")[-1]
+        text = extract_text(path, ext)
+        os.remove(path)
 
-            if not text.strip():
-                return {"nome": "Erro leitura", "arquivo": os.path.basename(path), "score": "-"}
+        result = analyze_resume(text, vaga)
+        result["arquivo"] = os.path.basename(path)
+        result["vaga"] = job_title
 
-            for _ in range(2):
-                result = analyze_resume(text, vaga)
-                if result.get("status") != "Erro IA":
-                    break
+        return result
 
-            result["arquivo"] = os.path.basename(path)
-            return result
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        futures = [ex.submit(process, f) for f in files]
 
-        except:
-            return {"nome": "Erro", "arquivo": os.path.basename(path), "score": "-"}
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(process_path, p) for p in filepaths]
-
-        total = len(futures)
-        done = 0
-
-        for future in as_completed(futures):
+        for i, future in enumerate(as_completed(futures)):
             results.append(future.result())
-            done += 1
 
             with tasks_lock:
-                tasks[task_id]["progress"] = int((done / total) * 100)
-
-    results.sort(
-        key=lambda x: float(x.get("score", 0)) if str(x.get("score")).isdigit() else -1,
-        reverse=True
-    )
+                tasks[task_id]["progress"] = int((i+1)/len(files)*100)
 
     with tasks_lock:
         tasks[task_id]["done"] = True
         tasks[task_id]["results"] = results
+
 
 # ========================
 # ROTAS
@@ -225,32 +215,25 @@ def index():
 
 @app.route("/processar", methods=["POST"])
 def processar():
-    vaga = request.form.get("job_profile", "")
+
+    vaga = request.form.get("job_profile")
+    job_title = request.form.get("job_title")
+
     files = request.files.getlist("resumes")
 
-    if not vaga:
-        flash("Descreva a vaga")
-        return redirect("/")
-
-    if not files or all(f.filename == "" for f in files):
-        flash("Envie arquivos")
-        return redirect("/")
-
     task_id = str(uuid.uuid4())
-    saved_files = []
+    paths = []
 
-    for file in files:
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
-            file.save(path)
-            saved_files.append(path)
+    for f in files:
+        filename = secure_filename(f.filename)
+        path = os.path.join(UPLOAD_FOLDER, f"{task_id}_{filename}")
+        f.save(path)
+        paths.append(path)
 
     with tasks_lock:
         tasks[task_id] = {"progress": 0, "done": False, "results": []}
 
-    thread = Thread(target=background_task, args=(task_id, saved_files, vaga))
-    thread.start()
+    Thread(target=background_task, args=(task_id, paths, vaga, job_title)).start()
 
     return redirect(f"/status/{task_id}")
 
@@ -262,16 +245,12 @@ def status(task_id):
 
 @app.route("/progresso/<task_id>")
 def progresso(task_id):
-    with tasks_lock:
-        task = tasks.get(task_id)
-
-    return jsonify(task if task else {"error": "not found"})
+    return jsonify(tasks.get(task_id, {}))
 
 
 @app.route("/resultado/<task_id>")
 def resultado(task_id):
-    with tasks_lock:
-        task = tasks.get(task_id)
+    task = tasks.get(task_id)
 
     if not task or not task["done"]:
         return redirect(f"/status/{task_id}")
@@ -279,81 +258,106 @@ def resultado(task_id):
     return render_template("resultado.html", results=task["results"])
 
 
-@app.route("/exportar", methods=["POST"])
-def exportar():
+# ========================
+# SALVAR NO BANCO
+# ========================
+@app.route("/salvar_banco", methods=["POST"])
+def salvar_banco():
+
+    if not supabase:
+        return "Configure o Supabase"
+
     results = json.loads(request.form.get("results_json"))
+
+    for r in results:
+        supabase.table("candidatos").insert({
+            "nome": r.get("nome"),
+            "whatsapp": r.get("whatsapp"),
+            "email": r.get("email"),
+            "linkedin": r.get("linkedin"),
+            "vaga": r.get("vaga"),
+            "score": r.get("score"),
+            "status": r.get("status"),
+            "justificativa": r.get("justificativa"),
+            "arquivo": r.get("arquivo")
+        }).execute()
+
+    return redirect("/banco")
+
+
+# ========================
+# BANCO
+# ========================
+@app.route("/banco")
+def banco():
+
+    vaga = request.args.get("vaga")
+
+    query = supabase.table("candidatos").select("*")
+
+    if vaga:
+        query = query.eq("vaga", vaga)
+
+    data = query.execute()
+
+    return render_template("banco.html", candidatos=data.data)
+
+
+# ========================
+# EXPORTAÇÃO
+# ========================
+def gerar_excel(results):
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Candidatos"
 
-    headers = [
-        "Nome do Candidato",
-        "WhatsApp",
-        "Email",
-        "LinkedIn",
-        "Score (%)",
-        "Status",
-        "Justificativa",
-        "Arquivo"
-    ]
-
+    headers = ["Vaga", "Nome", "WhatsApp", "Email", "LinkedIn", "Score", "Status", "Justificativa"]
     ws.append(headers)
-
-    from openpyxl.styles import Font, PatternFill, Alignment
-
-    header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF")
-
-    for cell in ws[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
 
     for r in results:
         ws.append([
-            r.get("nome", ""),
-            r.get("whatsapp", ""),
-            r.get("email", ""),
-            r.get("linkedin", ""),
-            r.get("score", ""),
-            r.get("status", ""),
-            r.get("justificativa", ""),
-            r.get("arquivo", "")
+            r.get("vaga"),
+            r.get("nome"),
+            r.get("whatsapp"),
+            r.get("email"),
+            r.get("linkedin"),
+            r.get("score"),
+            r.get("status"),
+            r.get("justificativa")
         ])
-
-        row_idx = ws.max_row
-        status_val = str(r.get("status", "")).lower()
-
-        if "recomendado" in status_val and "não" not in status_val:
-            fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
-        else:
-            fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
-
-        for cell in ws[row_idx]:
-            cell.fill = fill
-
-    widths = [30, 20, 30, 40, 12, 18, 80, 30]
-
-    for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
-
-    for row in ws.iter_rows(min_row=2, min_col=7, max_col=7):
-        for cell in row:
-            cell.alignment = Alignment(wrap_text=True)
 
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
 
-    return send_file(
-        output,
-        as_attachment=True,
-        download_name="candidatos_analisados.xlsx",
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    return output
+
+
+@app.route("/exportar", methods=["POST"])
+def exportar():
+    results = json.loads(request.form.get("results_json"))
+    output = gerar_excel(results)
+
+    return send_file(output, as_attachment=True, download_name="resultado.xlsx")
+
+
+@app.route("/exportar_banco", methods=["POST"])
+def exportar_banco():
+
+    vaga = request.form.get("vaga")
+
+    query = supabase.table("candidatos").select("*")
+
+    if vaga:
+        query = query.eq("vaga", vaga)
+
+    data = query.execute()
+
+    output = gerar_excel(data.data)
+
+    return send_file(output, as_attachment=True, download_name="banco.xlsx")
 
 
 # ========================
 if __name__ == "__main__":
-    app.run(debug=False)
+    app.run(debug=True)
