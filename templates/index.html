@@ -1,116 +1,74 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-<meta charset="UTF-8">
-<title>Triagem de Currículos</title>
-
-<style>
-body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #0f172a;
-    color: #fff;
-}
-
-/* HEADER */
-.header {
-    width: 100%;
-    padding: 15px 30px;
-    background: #020617;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.logo {
-    font-size: 20px;
-    font-weight: bold;
-}
-
-.nav a {
-    color: white;
-    text-decoration: none;
-    margin-left: 20px;
-    padding: 8px 12px;
-    background: #1e293b;
-    border-radius: 6px;
-}
-
-/* CONTEÚDO */
-.container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: calc(100vh - 70px);
-}
-
-.card {
-    background: #020617;
-    padding: 30px;
-    border-radius: 12px;
-    width: 500px;
-    box-shadow: 0 0 20px rgba(0,0,0,0.5);
-}
-
-h1 {
-    margin-top: 0;
-}
-
-input, textarea {
-    width: 100%;
-    padding: 10px;
-    margin-top: 10px;
-    margin-bottom: 20px;
-    border-radius: 6px;
-    border: none;
-}
-
-button {
-    width: 100%;
-    padding: 12px;
-    background: linear-gradient(90deg, #22c55e, #4ade80);
-    border: none;
-    border-radius: 8px;
-    color: #000;
-    font-weight: bold;
-    cursor: pointer;
-    font-size: 16px;
-}
-</style>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Análise de Currículos com IA</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-
 <body>
+  <div class="container">
+    <header>
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='logo.jpeg') }}" alt="SODITRI.IA">
+      </div>
+      <h1>Análise de Currículos com IA</h1>
+      <p>Anexe os currículos e descreva a vaga. A IA vai extrair os dados e avaliar a compatibilidade de cada candidato.</p>
+    </header>
 
-<div class="header">
-    <div class="logo">⚡ Triagem IA</div>
-    <div class="nav">
-        /bancoBanco de Currículos</a>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="alert">
+          {% for msg in messages %}
+            <p>{{ msg }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form action="/processar" method="post" enctype="multipart/form-data" id="mainForm">
+      <div class="form-group">
+        <label for="job_profile">Perfil da vaga / requisitos *</label>
+        <textarea name="job_profile" id="job_profile" rows="8" placeholder="Ex: Vaga para Analista de Marketing Digital. Requisitos: experiência com tráfego pago (Google Ads, Meta Ads), gestão de redes sociais, ensino superior em Marketing ou áreas afins, boa comunicação escrita, experiência mínima de 2 anos." required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="resumes">Currículos (PDF, DOCX ou TXT) *</label>
+        <input type="file" name="resumes" id="resumes" multiple accept=".pdf,.docx,.doc,.txt" required>
+        <small>Você pode selecionar vários arquivos de uma vez.</small>
+        <div id="fileList" class="file-list"></div>
+      </div>
+
+      <button type="submit" id="submitBtn">Analisar Currículos</button>
+    </form>
+
+    <div id="loading" class="loading" style="display:none;">
+      <div class="spinner"></div>
+      <p>Analisando currículos com IA... Isso pode levar alguns segundos por currículo.</p>
     </div>
-</div>
+  </div>
 
-<div class="container">
+  <script>
+    const fileInput = document.getElementById('resumes');
+    const fileList = document.getElementById('fileList');
+    const form = document.getElementById('mainForm');
+    const loading = document.getElementById('loading');
+    const submitBtn = document.getElementById('submitBtn');
 
-    <div class="card">
-        <h1>Triagem de Currículos</h1>
+    fileInput.addEventListener('change', () => {
+      fileList.innerHTML = '';
+      Array.from(fileInput.files).forEach(f => {
+        const item = document.createElement('div');
+        item.textContent = '📄 ' + f.name;
+        fileList.appendChild(item);
+      });
+    });
 
-        /processar
-
-            <label>Título da vaga</label>
-            <input type="text" name="job_title" required>
-
-            <label>Descrição da vaga</label>
-            <textarea name="job_profile" rows="6" required></textarea>
-
-            <label>Enviar currículos</label>
-            <input type="file" name="resumes" multiple required>
-
-            <button type="submit">Analisar Currículos</button>
-
-        </form>
-    </div>
-
-</div>
-
+    form.addEventListener('submit', () => {
+      form.style.display = 'none';
+      loading.style.display = 'block';
+      submitBtn.disabled = true;
+    });
+  </script>
 </body>
 </html>
