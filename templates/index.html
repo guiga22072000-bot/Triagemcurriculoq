@@ -1,29 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
-    <title>Triagem de Currículos</title>
+<meta charset="UTF-8">
+<title>Triagem de Currículos</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #0f172a;
+    color: #fff;
+}
+
+/* HEADER */
+.header {
+    width: 100%;
+    padding: 15px 30px;
+    background: #020617;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.nav a {
+    color: white;
+    text-decoration: none;
+    margin-left: 20px;
+    padding: 8px 12px;
+    background: #1e293b;
+    border-radius: 6px;
+}
+
+/* CONTEÚDO */
+.container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: calc(100vh - 70px);
+}
+
+.card {
+    background: #020617;
+    padding: 30px;
+    border-radius: 12px;
+    width: 500px;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+}
+
+h1 {
+    margin-top: 0;
+}
+
+input, textarea {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    margin-bottom: 20px;
+    border-radius: 6px;
+    border: none;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(90deg, #22c55e, #4ade80);
+    border: none;
+    border-radius: 8px;
+    color: #000;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 16px;
+}
+</style>
+
 </head>
+
 <body>
 
-<h1>Triagem de Currículos</h1>
+<div class="header">
+    <div class="logo">⚡ Triagem IA</div>
+    <div class="nav">
+        /bancoBanco de Currículos</a>
+    </div>
+</div>
 
-banco">Ir para Banco de Currículos</a>
+<div class="container">
 
-/processar
+    <div class="card">
+        <h1>Triagem de Currículos</h1>
 
-    <h3>Título da vaga</h3>
-    <input type="text" name="job_title" required style="width:300px">
+        /processar
 
-    <h3>Descrição da vaga</h3>
-    <textarea name="job_profile" rows="10" cols="80" required></textarea>
+            <label>Título da vaga</label>
+            <input type="text" name="job_title" required>
 
-    <h3>Envie os currículos</h3>
-    <input type="file" name="resumes" multiple required>
+            <label>Descrição da vaga</label>
+            <textarea name="job_profile" rows="6" required></textarea>
 
-    <br><br>
-    <button type="submit">Analisar currículos</button>
+            <label>Enviar currículos</label>
+            <input type="file" name="resumes" multiple required>
 
-</form>
+            <button type="submit">Analisar Currículos</button>
+
+        </form>
+    </div>
+
+</div>
 
 </body>
 </html>
