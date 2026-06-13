@@ -1,65 +1,59 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
-    <title>Resultados</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Resultado da Análise</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <div class="container wide">
+    <header>
+      <div class="logo-wrapper">
+        <img src="{{ url_for('static', filename='logo.jpeg') }}" alt="SODITRI.IA">
+      </div>
+      <h1>Resultado da Análise</h1>
+      <a href="/" class="back-link">← Nova análise</a>
+    </header>
 
-<h1>Resultado da Análise</h1>
+    <details class="job-profile-box">
+      <summary>Ver perfil da vaga utilizado</summary>
+      <p>{{ job_profile }}</p>
+    </details>
 
-/Nova análise</a> |
-banco">Banco de Currículos</a>
+    <form action="/exportar" method="post">
+      <input type="hidden" name="results_json" value='{{ results | tojson | safe }}'>
+      <button type="submit" class="export-btn">⬇️ Exportar para Excel (.xlsx)</button>
+    </form>
 
-<br><br>
-
-ar" method="POST">
-    <input type="hidden" name="results_json" value='{{ results|tojson }}'>
-    <button type="submit">Exportar Excel</button>
-</form>
-
-<br>
-
-/salvar_banco
-    <input type="hidden" name="results_json" value='{{ results|tojson }}'>
-    <button type="submit">Salvar no banco</button>
-</form>
-
-<br><br>
-
-<table border="1" cellpadding="5">
-    <tr>
-        <th>Vaga</th>
-        <th>Nome</th>
-        <th>WhatsApp</th>
-        <th>Email</th>
-        <th>LinkedIn</th>
-        <th>Score</th>
-        <th>Status</th>
-        <th>Justificativa</th>
-    </tr>
-
-    {% for r in results %}
-    <tr>
-        <td>{{ r.vaga }}</td>
-        <td>{{ r.nome }}</td>
-        <td>{{ r.whatsapp }}</td>
-        <td>{{ r.email }}</td>
-
-        <td>
-            {% if r.linkedin and r.linkedin != "Não encontrado" %}
-                {{ r.linkedin }}>
-            {% else %}
-                -
-            {% endif %}
-        </td>
-
-        <td>{{ r.score }}</td>
-        <td>{{ r.status }}</td>
-        <td>{{ r.justificativa }}</td>
-    </tr>
-    {% endfor %}
-
-</table>
-
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Nome do Candidato</th>
+            <th>WhatsApp</th>
+            <th>Email</th>
+            <th>Compatibilidade</th>
+            <th>Status</th>
+            <th>Justificativa</th>
+            <th>Arquivo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in results %}
+          <tr class="{% if 'não' in (r.status|lower) or 'nao' in (r.status|lower) %}row-no{% elif 'recomendado' in (r.status|lower) %}row-yes{% endif %}">
+            <td>{{ r.nome }}</td>
+            <td>{{ r.whatsapp }}</td>
+            <td>{{ r.email }}</td>
+            <td class="score-cell">{{ r.score }}{% if r.score is number or (r.score|string).isdigit() %}%{% endif %}</td>
+            <td><span class="status-badge">{{ r.status }}</span></td>
+            <td class="justificativa">{{ r.justificativa }}</td>
+            <td class="filename">{{ r.arquivo }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </body>
 </html>
