@@ -1,74 +1,29 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Análise de Currículos com IA</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Triagem de Currículos</title>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div class="logo-wrapper">
-        <img src="{{ url_for('static', filename='logo.jpeg') }}" alt="SODITRI.IA">
-      </div>
-      <h1>Análise de Currículos com IA</h1>
-      <p>Anexe os currículos e descreva a vaga. A IA vai extrair os dados e avaliar a compatibilidade de cada candidato.</p>
-    </header>
 
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        <div class="alert">
-          {% for msg in messages %}
-            <p>{{ msg }}</p>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
+<h1>Triagem de Currículos</h1>
 
-    <form action="/processar" method="post" enctype="multipart/form-data" id="mainForm">
-      <div class="form-group">
-        <label for="job_profile">Perfil da vaga / requisitos *</label>
-        <textarea name="job_profile" id="job_profile" rows="8" placeholder="Ex: Vaga para Analista de Marketing Digital. Requisitos: experiência com tráfego pago (Google Ads, Meta Ads), gestão de redes sociais, ensino superior em Marketing ou áreas afins, boa comunicação escrita, experiência mínima de 2 anos." required></textarea>
-      </div>
+banco">Ir para Banco de Currículos</a>
 
-      <div class="form-group">
-        <label for="resumes">Currículos (PDF, DOCX ou TXT) *</label>
-        <input type="file" name="resumes" id="resumes" multiple accept=".pdf,.docx,.doc,.txt" required>
-        <small>Você pode selecionar vários arquivos de uma vez.</small>
-        <div id="fileList" class="file-list"></div>
-      </div>
+/processar
 
-      <button type="submit" id="submitBtn">Analisar Currículos</button>
-    </form>
+    <h3>Título da vaga</h3>
+    <input type="text" name="job_title" required style="width:300px">
 
-    <div id="loading" class="loading" style="display:none;">
-      <div class="spinner"></div>
-      <p>Analisando currículos com IA... Isso pode levar alguns segundos por currículo.</p>
-    </div>
-  </div>
+    <h3>Descrição da vaga</h3>
+    <textarea name="job_profile" rows="10" cols="80" required></textarea>
 
-  <script>
-    const fileInput = document.getElementById('resumes');
-    const fileList = document.getElementById('fileList');
-    const form = document.getElementById('mainForm');
-    const loading = document.getElementById('loading');
-    const submitBtn = document.getElementById('submitBtn');
+    <h3>Envie os currículos</h3>
+    <input type="file" name="resumes" multiple required>
 
-    fileInput.addEventListener('change', () => {
-      fileList.innerHTML = '';
-      Array.from(fileInput.files).forEach(f => {
-        const item = document.createElement('div');
-        item.textContent = '📄 ' + f.name;
-        fileList.appendChild(item);
-      });
-    });
+    <br><br>
+    <button type="submit">Analisar currículos</button>
 
-    form.addEventListener('submit', () => {
-      form.style.display = 'none';
-      loading.style.display = 'block';
-      submitBtn.disabled = true;
-    });
-  </script>
+</form>
+
 </body>
 </html>
